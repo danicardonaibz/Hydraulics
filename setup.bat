@@ -40,14 +40,24 @@ if errorlevel 1 (
 )
 
 echo.
+echo Installing hydraulics package in development mode...
+pip install -e .
+if errorlevel 1 (
+    echo Error: Failed to install hydraulics package.
+    pause
+    exit /b 1
+)
+
+echo.
 echo ============================================================
 echo Setup complete!
 echo ============================================================
 echo.
 echo To use the tool:
+echo 1. Run: run.bat
+echo.
+echo Or manually:
 echo 1. Activate the virtual environment: venv\Scripts\activate
 echo 2. Run the tool: python hydro_calc.py
-echo.
-echo Or simply run: run.bat
 echo.
 pause
