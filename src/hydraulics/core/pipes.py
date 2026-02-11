@@ -40,6 +40,47 @@ def list_available_pipes():
     return sorted(HDPE_PIPES.keys(), key=lambda x: HDPE_PIPES[x]["nominal"])
 
 
+def get_adjacent_pipe_sizes(nominal_designation, num_smaller=2, num_larger=1):
+    """
+    Get adjacent pipe sizes for comparison purposes
+
+    Args:
+        nominal_designation: String like "N20", "N25", etc.
+        num_smaller: Number of smaller pipe sizes to return
+        num_larger: Number of larger pipe sizes to return
+
+    Returns:
+        Dictionary with keys 'smaller', 'selected', 'larger' containing pipe designations
+        Returns None for missing sizes if at boundaries
+    """
+    if nominal_designation not in HDPE_PIPES:
+        raise ValueError(f"Unknown pipe designation: {nominal_designation}")
+
+    # Get sorted list of all pipe designations
+    sorted_pipes = list_available_pipes()
+    current_idx = sorted_pipes.index(nominal_designation)
+
+    # Get smaller pipes (up to num_smaller)
+    smaller = []
+    for i in range(1, num_smaller + 1):
+        idx = current_idx - i
+        if idx >= 0:
+            smaller.insert(0, sorted_pipes[idx])  # Insert at beginning to maintain order
+
+    # Get larger pipes (up to num_larger)
+    larger = []
+    for i in range(1, num_larger + 1):
+        idx = current_idx + i
+        if idx < len(sorted_pipes):
+            larger.append(sorted_pipes[idx])
+
+    return {
+        'smaller': smaller,
+        'selected': nominal_designation,
+        'larger': larger
+    }
+
+
 def display_pipe_table():
     """Display a table of available pipes"""
     print("\n=== HDPE PIPE SPECIFICATIONS (PN 10) ===")

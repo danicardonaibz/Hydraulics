@@ -2,7 +2,7 @@
 
 from hydraulics.models.zones import IrrigationZone, TransportZone
 from hydraulics.calculators.segment import calculate_section_loss, calculate_christiansen_head_loss
-from hydraulics.core.pipes import get_pipe_internal_diameter
+from hydraulics.core.pipes import get_pipe_internal_diameter, get_adjacent_pipe_sizes
 from hydraulics.core.properties import WaterProperties
 from hydraulics.io.config import config
 
@@ -34,17 +34,20 @@ class DrippingArtery:
                 f"does not match total flow ({self.total_flow} {config.flow_unit})"
             )
 
-    def calculate(self):
-        """Calculate head losses for the entire artery"""
-        # Validate flow conservation
-        self.validate_flow_conservation()
+    def _calculate_for_diameter(self, diameter):
+        """
+        Internal method to calculate head losses for a specific diameter
 
-        # Get pipe properties
-        diameter = get_pipe_internal_diameter(self.pipe_designation)
+        Args:
+            diameter: Pipe internal diameter in meters
+
+        Returns:
+            Dictionary with calculation results
+        """
         roughness = WaterProperties.hdpe_roughness
 
         # Initialize
-        self.results = []
+        zone_results = []
         cumulative_head_loss = 0.0
         cumulative_length = 0.0
         current_flow = config.convert_flow_to_m3s(self.total_flow)
@@ -89,6 +92,7 @@ class DrippingArtery:
                         'flow_m3s': segment_flow,
                         'velocity': seg_result['velocity'],
                         'reynolds': seg_result['reynolds'],
+                        'flow_regime': seg_result['flow_regime'],
                         'friction_factor': seg_result['friction_factor'],
                         'friction_method': seg_result['friction_method'],
                         'head_loss': seg_result['head_loss'],
@@ -115,7 +119,7 @@ class DrippingArtery:
                 cumulative_head_loss = result['cumulative_head_loss']
                 cumulative_length = result['cumulative_length']
 
-            self.results.append(result)
+            zone_results.append(result)
 
         # Calculate simplified model (all flow exits at the end)
         total_length = cumulative_length
@@ -142,5 +146,64 @@ class DrippingArtery:
             'total_head_loss': cumulative_head_loss,
             'simplified_head_loss': simplified_result['head_loss'],
             'christiansen': christiansen_result,
-            'zones': self.results
+            'zones': zone_results
+        }
+
+    def calculate(self):
+        """Calculate head losses for the entire artery using the selected pipe designation"""
+        # Validate flow conservation
+        self.validate_flow_conservation()
+
+        # Get pipe properties
+        diameter = get_pipe_internal_diameter(self.pipe_designation)
+
+        # Perform calculation
+        results = self._calculate_for_diameter(diameter)
+
+        # Store results for backward compatibility
+        self.results = results['zones']
+
+        return results
+
+    def calculate_with_dn_comparison(self):
+        """
+        Calculate head losses for multiple DN sizes for comparison
+
+        Returns:
+            Dictionary with:
+            - 'selected': Results for the user-selected DN
+            - 'dn_comparison': List of results for adjacent DN sizes
+        """
+        # Validate flow conservation
+        self.validate_flow_conservation()
+
+        # Get adjacent pipe sizes (2 smaller, 1 larger)
+        adjacent_sizes = get_adjacent_pipe_sizes(self.pipe_designation, num_smaller=2, num_larger=1)
+
+        # Collect all DN sizes to calculate
+        all_dns = adjacent_sizes['smaller'] + [adjacent_sizes['selected']] + adjacent_sizes['larger']
+
+        # Calculate for each DN size
+        dn_results = []
+        for dn in all_dns:
+            diameter = get_pipe_internal_diameter(dn)
+            result = self._calculate_for_diameter(diameter)
+
+            dn_results.append({
+                'pipe_designation': dn,
+                'is_selected': (dn == self.pipe_designation),
+                'internal_diameter_mm': diameter * 1000,
+                'full_calculation': result['total_head_loss'],
+                'christiansen': result['christiansen']['head_loss'] if result['christiansen'] else None,
+                'simplified': result['simplified_head_loss'],
+                'full_result': result  # Complete result for detailed reporting
+            })
+
+        # Get the selected DN result for backward compatibility
+        selected_result = next(r['full_result'] for r in dn_results if r['is_selected'])
+        self.results = selected_result['zones']
+
+        return {
+            'selected': selected_result,
+            'dn_comparison': dn_results
         }

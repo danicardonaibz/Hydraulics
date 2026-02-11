@@ -3,7 +3,7 @@
 from hydraulics.models.zones import TransportZone, IrrigationZone
 from hydraulics.models.artery import DrippingArtery
 from hydraulics.core.pipes import list_available_pipes, display_pipe_table
-from hydraulics.core.properties import display_water_properties
+from hydraulics.core.properties import display_water_properties, WaterProperties
 from hydraulics.io.config import config
 from hydraulics.io.reports import generate_report
 
@@ -336,6 +336,28 @@ def run_dripping_artery_wizard():
     print("DRIPPING ARTERY CALCULATOR")
     print("="*60)
 
+    # Get water temperature
+    print("\n--- Water Temperature ---")
+    print("Enter water temperature (default is 20C).")
+    print("Press Enter to use default, or enter temperature (0-100C).")
+
+    while True:
+        temp_input = input("Water temperature (C) [20]: ").strip()
+
+        if temp_input == "":
+            # Use default 20°C
+            WaterProperties.reset_to_defaults()
+            break
+        else:
+            try:
+                temperature = float(temp_input)
+                WaterProperties.set_temperature(temperature)
+                break
+            except ValueError as e:
+                print(f"  [!] Error: {e}. Please try again.")
+            except Exception as e:
+                print(f"  [!] Invalid input: {e}. Please enter a number between 0 and 100.")
+
     # Display water properties
     display_water_properties()
 
@@ -421,14 +443,17 @@ def run_dripping_artery_wizard():
         print("CALCULATING...")
         print("="*60)
 
-        results = artery.calculate()
+        # Use DN comparison calculation
+        comparison_results = artery.calculate_with_dn_comparison()
+        results = comparison_results['selected']
+        dn_comparison = comparison_results['dn_comparison']
 
         # Display results
-        display_results(results, artery)
+        display_results(results, artery, dn_comparison)
 
         # Generate report
         print("\nGenerating report...")
-        report_path = generate_report(results, artery)
+        report_path = generate_report(results, artery, dn_comparison)
         print(f"[OK] Report saved to: {report_path}")
 
     except ValueError as e:
@@ -440,7 +465,7 @@ def run_dripping_artery_wizard():
         traceback.print_exc()
 
 
-def display_results(results, artery):
+def display_results(results, artery, dn_comparison=None):
     """Display calculation results"""
     print("\n" + "="*60)
     print("RESULTS")
@@ -450,6 +475,24 @@ def display_results(results, artery):
     print(f"Internal diameter: {results['diameter']*1000:.1f} mm")
     print(f"Total length: {results['total_length']:.2f} m")
     print(f"Initial flow: {artery.total_flow} {config.flow_unit}")
+
+    # Display DN comparison if available
+    if dn_comparison:
+        print("\n--- DN Size Comparison ---")
+        print(f"{'Pipe DN':<10} {'Int D (mm)':<12} {'Full Calc':<15} {'Christiansen':<15} {'Simplified':<15}")
+        print("-" * 70)
+        for dn_result in dn_comparison:
+            pipe_dn = dn_result['pipe_designation']
+            internal_d = dn_result['internal_diameter_mm']
+            full_loss = config.convert_pressure_from_m(dn_result['full_calculation'])
+            christiansen_loss = config.convert_pressure_from_m(dn_result['christiansen']) if dn_result['christiansen'] else None
+            simplified_loss = config.convert_pressure_from_m(dn_result['simplified'])
+
+            chris_str = f"{christiansen_loss:.4f}" if christiansen_loss else "N/A"
+            marker = " *" if dn_result['is_selected'] else ""
+
+            print(f"{pipe_dn:<10}{marker} {internal_d:<12.1f} {full_loss:<15.4f} {chris_str:<15} {simplified_loss:<15.4f}")
+        print(f"\n* = Selected pipe (all values in {config.pressure_unit})")
 
     print("\n--- Zone-by-Zone Results ---")
     for result in results['zones']:

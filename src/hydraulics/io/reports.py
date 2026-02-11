@@ -63,8 +63,63 @@ def generate_ascii_diagram(artery):
     return "\n".join(diagram)
 
 
-def generate_report(results, artery):
-    """Generate markdown report"""
+def generate_dn_comparison_table(dn_comparison_results):
+    """
+    Generate markdown table comparing head losses across different DN sizes
+
+    Args:
+        dn_comparison_results: List of dictionaries with DN comparison data
+
+    Returns:
+        List of strings containing the markdown table
+    """
+    lines = []
+    lines.append("\n## DN Size Comparison")
+    lines.append("\nThis table compares head losses for different pipe diameters using three calculation methods:")
+    lines.append("1. **Full Calculation**: Segment-by-segment with Darcy-Weisbach/Colebrook-White")
+    lines.append("2. **Christiansen**: Approximation for uniformly spaced outlets")
+    lines.append("3. **Simplified**: Constant flow assumption (all water exits at end)")
+    lines.append("\nThe **selected pipe** is indicated in bold.")
+
+    # Build table header
+    lines.append(f"\n| Pipe DN | Internal D (mm) | Full Calculation ({config.pressure_unit}) | Christiansen ({config.pressure_unit}) | Simplified ({config.pressure_unit}) |")
+    lines.append("|---------|-----------------|----------------------|----------------------|---------------------|")
+
+    # Build table rows
+    for dn_result in dn_comparison_results:
+        pipe_dn = dn_result['pipe_designation']
+        internal_d = dn_result['internal_diameter_mm']
+        full_loss = config.convert_pressure_from_m(dn_result['full_calculation'])
+        christiansen_loss = config.convert_pressure_from_m(dn_result['christiansen']) if dn_result['christiansen'] else 'N/A'
+        simplified_loss = config.convert_pressure_from_m(dn_result['simplified'])
+
+        # Format Christiansen value
+        chris_str = f"{christiansen_loss:.4f}" if christiansen_loss != 'N/A' else 'N/A'
+
+        # Bold the selected pipe
+        if dn_result['is_selected']:
+            lines.append(f"| **{pipe_dn}** | **{internal_d:.1f}** | **{full_loss:.4f}** | **{chris_str}** | **{simplified_loss:.4f}** |")
+        else:
+            lines.append(f"| {pipe_dn} | {internal_d:.1f} | {full_loss:.4f} | {chris_str} | {simplified_loss:.4f} |")
+
+    lines.append("\n**Interpretation:**")
+    lines.append("- Smaller DN sizes result in higher head losses due to increased friction")
+    lines.append("- Larger DN sizes reduce head losses but increase material costs")
+    lines.append("- The Christiansen approximation is typically within 5-10% of the full calculation")
+    lines.append("- The simplified model overestimates losses, providing a conservative upper bound")
+
+    return lines
+
+
+def generate_report(results, artery, dn_comparison=None):
+    """
+    Generate markdown report
+
+    Args:
+        results: Calculation results for the selected pipe
+        artery: DrippingArtery object
+        dn_comparison: Optional list of DN comparison results
+    """
 
     # Create reports directory if it doesn't exist
     reports_dir = "reports"
@@ -89,17 +144,23 @@ def generate_report(results, artery):
     lines.append(f"- **Initial flow:** {artery.total_flow} {config.flow_unit}")
     lines.append(f"- **Number of zones:** {len(artery.zones)}")
 
+    # DN Comparison (if available)
+    if dn_comparison:
+        lines.extend(generate_dn_comparison_table(dn_comparison))
+
     # ASCII diagram
     lines.append("\n## Installation Diagram")
     lines.append(generate_ascii_diagram(artery))
 
     # Water properties
-    lines.append("\n## Water Properties (NIST data at 20°C)")
-    lines.append(f"- **Density (ρ):** {WaterProperties.density} kg/m³")
-    lines.append(f"- **Dynamic viscosity (μ):** {WaterProperties.dynamic_viscosity*1000:.3f} mPa·s")
-    lines.append(f"- **Kinematic viscosity (ν):** {WaterProperties.kinematic_viscosity*1e6:.3f} mm²/s")
-    lines.append(f"- **Gravitational acceleration (g):** {WaterProperties.g} m/s²")
-    lines.append(f"- **HDPE pipe roughness (ε):** {WaterProperties.hdpe_roughness*1000:.4f} mm")
+    source_label = "IAPWS" if WaterProperties.source == "iapws" else "NIST data (default)"
+    lines.append(f"\n## Water Properties ({source_label} at {WaterProperties.temperature:.1f} deg C)")
+    lines.append(f"- **Temperature:** {WaterProperties.temperature:.1f} deg C")
+    lines.append(f"- **Density (rho):** {WaterProperties.density:.2f} kg/m^3")
+    lines.append(f"- **Dynamic viscosity (mu):** {WaterProperties.dynamic_viscosity*1000:.3f} mPa·s")
+    lines.append(f"- **Kinematic viscosity (nu):** {WaterProperties.kinematic_viscosity*1e6:.3f} mm^2/s")
+    lines.append(f"- **Gravitational acceleration (g):** {WaterProperties.g} m/s^2")
+    lines.append(f"- **HDPE pipe roughness (epsilon):** {WaterProperties.hdpe_roughness*1000:.4f} mm")
 
     # Zone-by-zone results
     lines.append("\n## Zone-by-Zone Analysis")
@@ -202,29 +263,65 @@ def generate_report(results, artery):
     lines.append("\n## Calculation Methods")
 
     lines.append("\n### Darcy-Weisbach Equation")
-    lines.append("$$h_f = f \\cdot \\frac{L}{D} \\cdot \\frac{v^2}{2g}$$")
+    lines.append("\n```")
+    lines.append("         L    v^2")
+    lines.append("h_f = f × ─ × ───")
+    lines.append("         D    2g")
+    lines.append("```")
+    lines.append("\nWhere:")
+    lines.append("- h_f = Head loss due to friction (m)")
+    lines.append("- f = Darcy friction factor (dimensionless)")
+    lines.append("- L = Pipe length (m)")
+    lines.append("- D = Pipe internal diameter (m)")
+    lines.append("- v = Flow velocity (m/s)")
+    lines.append("- g = Gravitational acceleration (9.81 m/s^2)")
 
     lines.append("\n### Friction Factor Calculation")
     lines.append("\n**For Laminar Flow (Re < 2000):**")
-    lines.append("$$f = \\frac{64}{Re}$$")
+    lines.append("\n```")
+    lines.append("    64")
+    lines.append("f = ──")
+    lines.append("    Re")
+    lines.append("```")
 
-    lines.append("\n**For Transitional and Turbulent Flow (Re ≥ 2000):**")
+    lines.append("\n**For Transitional and Turbulent Flow (Re >= 2000):**")
     lines.append("\nColebrook-White Equation:")
-    lines.append("$$\\frac{1}{\\sqrt{f}} = -2 \\log_{10} \\left( \\frac{\\epsilon}{3.7 D} + \\frac{2.51}{Re \\sqrt{f}} \\right)$$")
+    lines.append("\n```")
+    lines.append("  1           /  epsilon       2.51    \\")
+    lines.append("───── = -2 log| ───────── + ─────────  |")
+    lines.append("sqrt(f)       \\  3.7 × D    Re×sqrt(f)/")
+    lines.append("```")
+    lines.append("\nWhere:")
+    lines.append("- epsilon = Absolute pipe roughness (m)")
+    lines.append("- Re = Reynolds number (dimensionless)")
     lines.append("\nSolved using Newton-Raphson method. Colebrook-White is used for transitional flow (Re < 4000) as it provides conservative (higher) friction factors.")
 
     lines.append("\n### Reynolds Number")
-    lines.append("$$Re = \\frac{v \\cdot D}{\\nu}$$")
+    lines.append("\n```")
+    lines.append("    v × D")
+    lines.append("Re = ─────")
+    lines.append("      nu")
+    lines.append("```")
+    lines.append("\nWhere:")
+    lines.append("- v = Flow velocity (m/s)")
+    lines.append("- D = Pipe internal diameter (m)")
+    lines.append("- nu = Kinematic viscosity (m^2/s)")
 
     lines.append("\n### Christiansen Approximation")
     lines.append("\nFor irrigation laterals with uniformly spaced outlets:")
-    lines.append("$$h_f = F \\cdot L \\cdot J$$")
+    lines.append("\n```")
+    lines.append("h_f = F × L × J")
+    lines.append("```")
     lines.append("\nWhere:")
     lines.append("- F = Christiansen reduction factor")
-    lines.append("- L = Total pipe length")
-    lines.append("- J = Unit friction loss (calculated with full flow)")
+    lines.append("- L = Total pipe length (m)")
+    lines.append("- J = Unit friction loss (calculated with full flow, m/m)")
     lines.append("\n**Christiansen Coefficient:**")
-    lines.append("$$F = \\frac{1}{m+1} + \\frac{1}{2N} + \\frac{\\sqrt{m-1}}{6N^2}$$")
+    lines.append("\n```")
+    lines.append("     1        1      sqrt(m-1)")
+    lines.append("F = ───── + ──── + ──────────")
+    lines.append("    m + 1    2N       6 × N^2")
+    lines.append("```")
     lines.append("\nWhere:")
     lines.append("- N = Number of outlets")
     lines.append("- m = Flow regime exponent (m=2 for Darcy-Weisbach turbulent, m=1.75 for Hazen-Williams)")
