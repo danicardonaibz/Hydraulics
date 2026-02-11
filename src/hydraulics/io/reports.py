@@ -63,6 +63,57 @@ def generate_ascii_diagram(artery):
     return "\n".join(diagram)
 
 
+def generate_pump_pressure_table(dn_comparison_results):
+    """
+    Generate markdown table showing required pump pressures for different DN sizes
+    across the dripper operating range (1.5-4 bar)
+
+    Args:
+        dn_comparison_results: List of dictionaries with DN comparison data
+
+    Returns:
+        List of strings containing the markdown table
+    """
+    lines = []
+    lines.append("\n## Required Pump Pressure by Pipe Diameter")
+    lines.append("\nThis table shows the required pump pressure range for pressure-compensated drippers")
+    lines.append("operating at 1.5-4 bar across different pipe diameters.")
+    lines.append("\nThe **selected pipe** is indicated in bold.")
+
+    # Build table header
+    lines.append(f"\n| Pipe DN | Internal D (mm) | Min Pump Pressure ({config.pressure_unit}) | Max Pump Pressure ({config.pressure_unit}) |")
+    lines.append("|---------|-----------------|--------------------------|--------------------------|")
+
+    # Build table rows
+    # Min pump pressure: at 4 bar dripper pressure (least demanding)
+    # Max pump pressure: at 1.5 bar dripper pressure (most demanding)
+    for dn_result in dn_comparison_results:
+        pipe_dn = dn_result['pipe_designation']
+        internal_d = dn_result['internal_diameter_mm']
+        head_loss = config.convert_pressure_from_m(dn_result['full_calculation'])
+
+        # Pump pressure = Dripper pressure + Head loss
+        # Min: when drippers need minimum pressure (1.5 bar)
+        # Max: when drippers need maximum pressure (4 bar)
+        min_pump_pressure = 1.5 + head_loss
+        max_pump_pressure = 4.0 + head_loss
+
+        # Bold the selected pipe
+        if dn_result['is_selected']:
+            lines.append(f"| **{pipe_dn}** | **{internal_d:.1f}** | **{min_pump_pressure:.2f}** | **{max_pump_pressure:.2f}** |")
+        else:
+            lines.append(f"| {pipe_dn} | {internal_d:.1f} | {min_pump_pressure:.2f} | {max_pump_pressure:.2f} |")
+
+    lines.append("\n**Notes:**")
+    lines.append("- Pressure-compensated drippers maintain constant flow in the range 1.5-4 bar")
+    lines.append("- Min pump pressure: Required when drippers operate at 1.5 bar (minimum)")
+    lines.append("- Max pump pressure: Required when drippers operate at 4 bar (maximum)")
+    lines.append("- Head loss increases with smaller pipe diameters, requiring higher pump pressure")
+    lines.append("- Select pipe diameter balancing pump costs (higher for smaller pipes) vs. material costs (higher for larger pipes)")
+
+    return lines
+
+
 def generate_dn_comparison_table(dn_comparison_results):
     """
     Generate markdown table comparing head losses across different DN sizes
@@ -134,6 +185,12 @@ def generate_report(results, artery, dn_comparison=None):
     lines = []
     lines.append("# Dripping Artery Hydraulic Calculation Report")
     lines.append(f"\n**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append("\n**IMPORTANT - Water Properties Reference Pressure:**")
+    lines.append("All water properties (density, viscosity) are calculated at **atmospheric pressure**")
+    lines.append("(1 bar / 0.101325 MPa) using the IAPWS-95 standard formulation. This is appropriate")
+    lines.append("for irrigation systems because hydraulic calculations depend on pressure *differences*")
+    lines.append("(head losses), not absolute pressures, and water properties are nearly incompressible")
+    lines.append("in the 1-10 bar range typical of irrigation applications.")
     lines.append(f"\n---\n")
 
     # Installation overview
@@ -143,6 +200,10 @@ def generate_report(results, artery, dn_comparison=None):
     lines.append(f"- **Total length:** {results['total_length']:.2f} m")
     lines.append(f"- **Initial flow:** {artery.total_flow} {config.flow_unit}")
     lines.append(f"- **Number of zones:** {len(artery.zones)}")
+
+    # Pump Pressure Table (if DN comparison available)
+    if dn_comparison:
+        lines.extend(generate_pump_pressure_table(dn_comparison))
 
     # DN Comparison (if available)
     if dn_comparison:
@@ -155,7 +216,12 @@ def generate_report(results, artery, dn_comparison=None):
     # Water properties
     source_label = "IAPWS" if WaterProperties.source == "iapws" else "NIST data (default)"
     lines.append(f"\n## Water Properties ({source_label} at {WaterProperties.temperature:.1f} deg C)")
-    lines.append(f"- **Temperature:** {WaterProperties.temperature:.1f} deg C")
+    lines.append("\n**Reference Pressure:** 1 bar (0.101325 MPa, atmospheric pressure)")
+    lines.append("Properties calculated using IAPWS-95 standard at atmospheric pressure.")
+    lines.append("This reference is appropriate for irrigation systems as hydraulic calculations")
+    lines.append("use pressure differences (head losses), and water is nearly incompressible")
+    lines.append("in the 1-10 bar operating range.")
+    lines.append(f"\n- **Temperature:** {WaterProperties.temperature:.1f} deg C")
     lines.append(f"- **Density (rho):** {WaterProperties.density:.2f} kg/m^3")
     lines.append(f"- **Dynamic viscosity (mu):** {WaterProperties.dynamic_viscosity*1000:.3f} mPa·s")
     lines.append(f"- **Kinematic viscosity (nu):** {WaterProperties.kinematic_viscosity*1e6:.3f} mm^2/s")
@@ -263,68 +329,48 @@ def generate_report(results, artery, dn_comparison=None):
     lines.append("\n## Calculation Methods")
 
     lines.append("\n### Darcy-Weisbach Equation")
-    lines.append("\n```")
-    lines.append("         L    v^2")
-    lines.append("h_f = f × ─ × ───")
-    lines.append("         D    2g")
-    lines.append("```")
+    lines.append("\nThe head loss due to friction in a pipe segment is calculated using:")
+    lines.append("\n$$h_f = f \\times \\frac{L}{D} \\times \\frac{v^2}{2g}$$")
     lines.append("\nWhere:")
-    lines.append("- h_f = Head loss due to friction (m)")
-    lines.append("- f = Darcy friction factor (dimensionless)")
-    lines.append("- L = Pipe length (m)")
-    lines.append("- D = Pipe internal diameter (m)")
-    lines.append("- v = Flow velocity (m/s)")
-    lines.append("- g = Gravitational acceleration (9.81 m/s^2)")
+    lines.append("- $h_f$ = Head loss due to friction (m)")
+    lines.append("- $f$ = Darcy friction factor (dimensionless)")
+    lines.append("- $L$ = Pipe length (m)")
+    lines.append("- $D$ = Pipe internal diameter (m)")
+    lines.append("- $v$ = Flow velocity (m/s)")
+    lines.append("- $g$ = Gravitational acceleration (9.81 m/s²)")
 
     lines.append("\n### Friction Factor Calculation")
     lines.append("\n**For Laminar Flow (Re < 2000):**")
-    lines.append("\n```")
-    lines.append("    64")
-    lines.append("f = ──")
-    lines.append("    Re")
-    lines.append("```")
+    lines.append("\n$$f = \\frac{64}{Re}$$")
 
-    lines.append("\n**For Transitional and Turbulent Flow (Re >= 2000):**")
+    lines.append("\n**For Transitional and Turbulent Flow (Re ≥ 2000):**")
     lines.append("\nColebrook-White Equation:")
-    lines.append("\n```")
-    lines.append("  1           /  epsilon       2.51    \\")
-    lines.append("───── = -2 log| ───────── + ─────────  |")
-    lines.append("sqrt(f)       \\  3.7 × D    Re×sqrt(f)/")
-    lines.append("```")
+    lines.append("\n$$\\frac{1}{\\sqrt{f}} = -2 \\log_{10}\\left(\\frac{\\epsilon}{3.7D} + \\frac{2.51}{Re\\sqrt{f}}\\right)$$")
     lines.append("\nWhere:")
-    lines.append("- epsilon = Absolute pipe roughness (m)")
-    lines.append("- Re = Reynolds number (dimensionless)")
+    lines.append("- $\\epsilon$ = Absolute pipe roughness (m)")
+    lines.append("- $Re$ = Reynolds number (dimensionless)")
     lines.append("\nSolved using Newton-Raphson method. Colebrook-White is used for transitional flow (Re < 4000) as it provides conservative (higher) friction factors.")
 
     lines.append("\n### Reynolds Number")
-    lines.append("\n```")
-    lines.append("    v × D")
-    lines.append("Re = ─────")
-    lines.append("      nu")
-    lines.append("```")
+    lines.append("\nThe Reynolds number characterizes the flow regime:")
+    lines.append("\n$$Re = \\frac{vD}{\\nu}$$")
     lines.append("\nWhere:")
-    lines.append("- v = Flow velocity (m/s)")
-    lines.append("- D = Pipe internal diameter (m)")
-    lines.append("- nu = Kinematic viscosity (m^2/s)")
+    lines.append("- $v$ = Flow velocity (m/s)")
+    lines.append("- $D$ = Pipe internal diameter (m)")
+    lines.append("- $\\nu$ = Kinematic viscosity (m²/s)")
 
     lines.append("\n### Christiansen Approximation")
-    lines.append("\nFor irrigation laterals with uniformly spaced outlets:")
-    lines.append("\n```")
-    lines.append("h_f = F × L × J")
-    lines.append("```")
+    lines.append("\nFor irrigation laterals with uniformly spaced outlets, the total head loss can be approximated as:")
+    lines.append("\n$$h_f = F \\times L \\times J$$")
     lines.append("\nWhere:")
-    lines.append("- F = Christiansen reduction factor")
-    lines.append("- L = Total pipe length (m)")
-    lines.append("- J = Unit friction loss (calculated with full flow, m/m)")
+    lines.append("- $F$ = Christiansen reduction factor")
+    lines.append("- $L$ = Total pipe length (m)")
+    lines.append("- $J$ = Unit friction loss (calculated with full flow, m/m)")
     lines.append("\n**Christiansen Coefficient:**")
-    lines.append("\n```")
-    lines.append("     1        1      sqrt(m-1)")
-    lines.append("F = ───── + ──── + ──────────")
-    lines.append("    m + 1    2N       6 × N^2")
-    lines.append("```")
+    lines.append("\n$$F = \\frac{1}{m+1} + \\frac{1}{2N} + \\frac{\\sqrt{m-1}}{6N^2}$$")
     lines.append("\nWhere:")
-    lines.append("- N = Number of outlets")
-    lines.append("- m = Flow regime exponent (m=2 for Darcy-Weisbach turbulent, m=1.75 for Hazen-Williams)")
+    lines.append("- $N$ = Number of outlets")
+    lines.append("- $m$ = Flow regime exponent ($m=2$ for Darcy-Weisbach turbulent, $m=1.75$ for Hazen-Williams)")
 
     lines.append("\n---")
     lines.append("\n*Report generated by Hydraulic Piping Calculation Tool*")
