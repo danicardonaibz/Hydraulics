@@ -10,9 +10,10 @@ from hydraulics.io.config import config
 class DrippingArtery:
     """Main class for dripping artery calculation"""
 
-    def __init__(self, total_flow, pipe_designation):
+    def __init__(self, total_flow, pipe_designation, pn_grade=None):
         self.total_flow = total_flow  # in configured units
         self.pipe_designation = pipe_designation
+        self.pn_grade = pn_grade if pn_grade else "PN10"  # Default to PN10
         self.zones = []
         self.results = []
 
@@ -150,12 +151,12 @@ class DrippingArtery:
         }
 
     def calculate(self):
-        """Calculate head losses for the entire artery using the selected pipe designation"""
+        """Calculate head losses for the entire artery using the selected pipe designation and PN grade"""
         # Validate flow conservation
         self.validate_flow_conservation()
 
-        # Get pipe properties
-        diameter = get_pipe_internal_diameter(self.pipe_designation)
+        # Get pipe properties with PN grade
+        diameter = get_pipe_internal_diameter(self.pipe_designation, self.pn_grade)
 
         # Perform calculation
         results = self._calculate_for_diameter(diameter)
@@ -168,11 +169,12 @@ class DrippingArtery:
     def calculate_with_dn_comparison(self):
         """
         Calculate head losses for multiple DN sizes for comparison
+        Uses the SAME PN grade across all DN sizes for fair comparison
 
         Returns:
             Dictionary with:
-            - 'selected': Results for the user-selected DN
-            - 'dn_comparison': List of results for adjacent DN sizes
+            - 'selected': Results for the user-selected DN and PN grade
+            - 'dn_comparison': List of results for adjacent DN sizes with same PN grade
         """
         # Validate flow conservation
         self.validate_flow_conservation()
@@ -183,14 +185,16 @@ class DrippingArtery:
         # Collect all DN sizes to calculate
         all_dns = adjacent_sizes['smaller'] + [adjacent_sizes['selected']] + adjacent_sizes['larger']
 
-        # Calculate for each DN size
+        # Calculate for each DN size with the SAME PN grade
         dn_results = []
         for dn in all_dns:
-            diameter = get_pipe_internal_diameter(dn)
+            # Use same PN grade as selected by user
+            diameter = get_pipe_internal_diameter(dn, self.pn_grade)
             result = self._calculate_for_diameter(diameter)
 
             dn_results.append({
                 'pipe_designation': dn,
+                'pn_grade': self.pn_grade,  # Include PN grade in results
                 'is_selected': (dn == self.pipe_designation),
                 'internal_diameter_mm': diameter * 1000,
                 'full_calculation': result['total_head_loss'],

@@ -2,7 +2,12 @@
 
 from hydraulics.models.zones import TransportZone, IrrigationZone
 from hydraulics.models.artery import DrippingArtery
-from hydraulics.core.pipes import list_available_pipes, display_pipe_table
+from hydraulics.core.pipes import (
+    list_available_pipes,
+    display_pipe_table,
+    list_available_pn_grades,
+    get_pipe_internal_diameter
+)
 from hydraulics.core.properties import display_water_properties, WaterProperties
 from hydraulics.io.config import config
 from hydraulics.io.reports import generate_report
@@ -79,6 +84,74 @@ def get_int_input(prompt, min_value=None, max_value=None):
         except KeyboardInterrupt:
             print("\n\nOperation cancelled by user.")
             raise
+
+
+def select_pn_grade_interactive(pipe_designation):
+    """
+    Interactive PN grade selection for a given pipe designation
+
+    Args:
+        pipe_designation: String like "N20", "N25", etc.
+
+    Returns:
+        Selected PN grade string (e.g., "PN10")
+    """
+    try:
+        available_pn_grades = list_available_pn_grades(pipe_designation)
+    except ValueError as e:
+        print(f"  [!] Error: {e}")
+        return "PN10"  # Default fallback
+
+    if not available_pn_grades:
+        print(f"  [!] No PN grades available for {pipe_designation}. Using default PN10.")
+        return "PN10"
+
+    print(f"\n--- Select PN Grade for {pipe_designation} ---")
+    print("PN grade determines pipe wall thickness and internal diameter:")
+    print("  - PN6:  Low pressure (6 bar)  - Thinner walls, larger flow capacity")
+    print("  - PN10: Medium pressure (10 bar) - Standard thickness [DEFAULT]")
+    print("  - PN16: High pressure (16 bar) - Thicker walls, smaller flow capacity")
+    print()
+
+    # Display available options
+    pn_options = {}
+    for idx, pn in enumerate(available_pn_grades, 1):
+        try:
+            internal_d = get_pipe_internal_diameter(pipe_designation, pn) * 1000  # Convert to mm
+            pn_options[idx] = pn
+            default_marker = " [DEFAULT]" if pn == "PN10" else ""
+            print(f"  {idx}. {pn:6} - Internal diameter: {internal_d:5.1f} mm{default_marker}")
+        except ValueError:
+            continue
+
+    # Get user selection
+    while True:
+        choice_input = input(f"\nSelect PN grade (1-{len(pn_options)}) or press Enter for default [PN10]: ").strip()
+
+        # Default to PN10
+        if choice_input == "":
+            if "PN10" in available_pn_grades:
+                print("  [OK] Using default PN10")
+                return "PN10"
+            else:
+                # Fallback to first available if PN10 not available
+                default_pn = available_pn_grades[0]
+                print(f"  [OK] Using {default_pn} (PN10 not available)")
+                return default_pn
+
+        try:
+            choice = int(choice_input)
+            if choice in pn_options:
+                selected_pn = pn_options[choice]
+                print(f"  [OK] Selected {selected_pn}")
+                return selected_pn
+            else:
+                print(f"  [!] Error: Please enter a number between 1 and {len(pn_options)}.")
+        except ValueError:
+            print("  [!] Error: Please enter a valid number or press Enter for default.")
+        except KeyboardInterrupt:
+            print("\n\nOperation cancelled by user. Using default PN10.")
+            return "PN10"
 
 
 def draw_artery_ascii(artery, show_flows=True):
@@ -382,8 +455,11 @@ def run_dripping_artery_wizard():
             print(f"[!] Invalid pipe designation: {pipe_designation}")
             print("    Please choose from the available pipes listed above.")
 
-    # Create artery
-    artery = DrippingArtery(total_flow, pipe_designation)
+    # Get PN grade selection
+    pn_grade = select_pn_grade_interactive(pipe_designation)
+
+    # Create artery with PN grade
+    artery = DrippingArtery(total_flow, pipe_designation, pn_grade)
 
     # Add zones with abbreviation support
     print("\n" + "="*60)
@@ -471,7 +547,8 @@ def display_results(results, artery, dn_comparison=None):
     print("RESULTS")
     print("="*60)
 
-    print(f"\nPipe: {artery.pipe_designation}")
+    print(f"\nPipe: {artery.pipe_designation}-{artery.pn_grade}")
+    print(f"PN Grade: {artery.pn_grade} ({artery.pn_grade[2:]} bar working pressure)")
     print(f"Internal diameter: {results['diameter']*1000:.1f} mm")
     print(f"Total length: {results['total_length']:.2f} m")
     print(f"Initial flow: {artery.total_flow} {config.flow_unit}")
@@ -479,10 +556,12 @@ def display_results(results, artery, dn_comparison=None):
     # Display DN comparison if available
     if dn_comparison:
         print("\n--- DN Size Comparison ---")
-        print(f"{'Pipe DN':<10} {'Int D (mm)':<12} {'Full Calc':<15} {'Christiansen':<15} {'Simplified':<15}")
-        print("-" * 70)
+        print(f"(All comparisons use {artery.pn_grade} grade)")
+        print(f"{'Pipe DN':<10} {'PN Grade':<10} {'Int D (mm)':<12} {'Full Calc':<15} {'Christiansen':<15} {'Simplified':<15}")
+        print("-" * 80)
         for dn_result in dn_comparison:
             pipe_dn = dn_result['pipe_designation']
+            pn_grade = dn_result.get('pn_grade', 'PN10')
             internal_d = dn_result['internal_diameter_mm']
             full_loss = config.convert_pressure_from_m(dn_result['full_calculation'])
             christiansen_loss = config.convert_pressure_from_m(dn_result['christiansen']) if dn_result['christiansen'] else None
@@ -491,7 +570,7 @@ def display_results(results, artery, dn_comparison=None):
             chris_str = f"{christiansen_loss:.4f}" if christiansen_loss else "N/A"
             marker = " *" if dn_result['is_selected'] else ""
 
-            print(f"{pipe_dn:<10}{marker} {internal_d:<12.1f} {full_loss:<15.4f} {chris_str:<15} {simplified_loss:<15.4f}")
+            print(f"{pipe_dn:<10}{marker} {pn_grade:<10} {internal_d:<12.1f} {full_loss:<15.4f} {chris_str:<15} {simplified_loss:<15.4f}")
         print(f"\n* = Selected pipe (all values in {config.pressure_unit})")
 
     print("\n--- Zone-by-Zone Results ---")

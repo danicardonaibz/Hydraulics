@@ -75,34 +75,47 @@ def generate_pump_pressure_table(dn_comparison_results):
         List of strings containing the markdown table
     """
     lines = []
+    # Get PN grade from first result (all should be the same)
+    pn_grade = dn_comparison_results[0].get('pn_grade', 'PN10') if dn_comparison_results else 'PN10'
+
     lines.append("\n## Required Pump Pressure by Pipe Diameter")
     lines.append("\nThis table shows the required pump pressure range for pressure-compensated drippers")
     lines.append("operating at 1.5-4 bar across different pipe diameters.")
+    lines.append(f"\n**Note:** All comparisons use {pn_grade} grade pipes.")
     lines.append("\nThe **selected pipe** is indicated in bold.")
 
     # Build table header
-    lines.append(f"\n| Pipe DN | Internal D (mm) | Min Pump Pressure ({config.pressure_unit}) | Max Pump Pressure ({config.pressure_unit}) |")
-    lines.append("|---------|-----------------|--------------------------|--------------------------|")
+    lines.append(f"\n| Pipe DN | PN Grade | Internal D (mm) | Min Pump Pressure ({config.pressure_unit}) | Max Pump Pressure ({config.pressure_unit}) |")
+    lines.append("|---------|----------|-----------------|--------------------------|--------------------------|")
+
+    # Convert dripper pressure range from bar to configured unit
+    # Dripper range is 1.5-4 bar (standard for pressure-compensated drippers)
+    # First convert bar to meters of water column, then to configured unit
+    min_dripper_bar = 1.5
+    max_dripper_bar = 4.0
+    min_dripper_m = min_dripper_bar / 0.0980665  # bar to mwc
+    max_dripper_m = max_dripper_bar / 0.0980665  # bar to mwc
+    min_dripper_pressure = config.convert_pressure_from_m(min_dripper_m)
+    max_dripper_pressure = config.convert_pressure_from_m(max_dripper_m)
 
     # Build table rows
-    # Min pump pressure: at 4 bar dripper pressure (least demanding)
-    # Max pump pressure: at 1.5 bar dripper pressure (most demanding)
     for dn_result in dn_comparison_results:
         pipe_dn = dn_result['pipe_designation']
+        pn_grade = dn_result.get('pn_grade', 'PN10')
         internal_d = dn_result['internal_diameter_mm']
         head_loss = config.convert_pressure_from_m(dn_result['full_calculation'])
 
         # Pump pressure = Dripper pressure + Head loss
         # Min: when drippers need minimum pressure (1.5 bar)
         # Max: when drippers need maximum pressure (4 bar)
-        min_pump_pressure = 1.5 + head_loss
-        max_pump_pressure = 4.0 + head_loss
+        min_pump_pressure = min_dripper_pressure + head_loss
+        max_pump_pressure = max_dripper_pressure + head_loss
 
         # Bold the selected pipe
         if dn_result['is_selected']:
-            lines.append(f"| **{pipe_dn}** | **{internal_d:.1f}** | **{min_pump_pressure:.2f}** | **{max_pump_pressure:.2f}** |")
+            lines.append(f"| **{pipe_dn}** | **{pn_grade}** | **{internal_d:.1f}** | **{min_pump_pressure:.2f}** | **{max_pump_pressure:.2f}** |")
         else:
-            lines.append(f"| {pipe_dn} | {internal_d:.1f} | {min_pump_pressure:.2f} | {max_pump_pressure:.2f} |")
+            lines.append(f"| {pipe_dn} | {pn_grade} | {internal_d:.1f} | {min_pump_pressure:.2f} | {max_pump_pressure:.2f} |")
 
     lines.append("\n**Notes:**")
     lines.append("- Pressure-compensated drippers maintain constant flow in the range 1.5-4 bar")
@@ -125,20 +138,25 @@ def generate_dn_comparison_table(dn_comparison_results):
         List of strings containing the markdown table
     """
     lines = []
+    # Get PN grade from first result (all should be the same)
+    pn_grade = dn_comparison_results[0].get('pn_grade', 'PN10') if dn_comparison_results else 'PN10'
+
     lines.append("\n## DN Size Comparison")
     lines.append("\nThis table compares head losses for different pipe diameters using three calculation methods:")
     lines.append("1. **Full Calculation**: Segment-by-segment with Darcy-Weisbach/Colebrook-White")
     lines.append("2. **Christiansen**: Approximation for uniformly spaced outlets")
     lines.append("3. **Simplified**: Constant flow assumption (all water exits at end)")
+    lines.append(f"\n**Note:** All comparisons use {pn_grade} grade pipes.")
     lines.append("\nThe **selected pipe** is indicated in bold.")
 
     # Build table header
-    lines.append(f"\n| Pipe DN | Internal D (mm) | Full Calculation ({config.pressure_unit}) | Christiansen ({config.pressure_unit}) | Simplified ({config.pressure_unit}) |")
-    lines.append("|---------|-----------------|----------------------|----------------------|---------------------|")
+    lines.append(f"\n| Pipe DN | PN Grade | Internal D (mm) | Full Calculation ({config.pressure_unit}) | Christiansen ({config.pressure_unit}) | Simplified ({config.pressure_unit}) |")
+    lines.append("|---------|----------|-----------------|----------------------|----------------------|---------------------|")
 
     # Build table rows
     for dn_result in dn_comparison_results:
         pipe_dn = dn_result['pipe_designation']
+        pn_grade = dn_result.get('pn_grade', 'PN10')
         internal_d = dn_result['internal_diameter_mm']
         full_loss = config.convert_pressure_from_m(dn_result['full_calculation'])
         christiansen_loss = config.convert_pressure_from_m(dn_result['christiansen']) if dn_result['christiansen'] else 'N/A'
@@ -149,9 +167,9 @@ def generate_dn_comparison_table(dn_comparison_results):
 
         # Bold the selected pipe
         if dn_result['is_selected']:
-            lines.append(f"| **{pipe_dn}** | **{internal_d:.1f}** | **{full_loss:.4f}** | **{chris_str}** | **{simplified_loss:.4f}** |")
+            lines.append(f"| **{pipe_dn}** | **{pn_grade}** | **{internal_d:.1f}** | **{full_loss:.4f}** | **{chris_str}** | **{simplified_loss:.4f}** |")
         else:
-            lines.append(f"| {pipe_dn} | {internal_d:.1f} | {full_loss:.4f} | {chris_str} | {simplified_loss:.4f} |")
+            lines.append(f"| {pipe_dn} | {pn_grade} | {internal_d:.1f} | {full_loss:.4f} | {chris_str} | {simplified_loss:.4f} |")
 
     lines.append("\n**Interpretation:**")
     lines.append("- Smaller DN sizes result in higher head losses due to increased friction")
@@ -195,7 +213,8 @@ def generate_report(results, artery, dn_comparison=None):
 
     # Installation overview
     lines.append("## Installation Overview")
-    lines.append(f"- **Pipe designation:** {artery.pipe_designation}")
+    lines.append(f"- **Pipe designation:** {artery.pipe_designation}-{artery.pn_grade}")
+    lines.append(f"- **PN Grade:** {artery.pn_grade} ({artery.pn_grade[2:]} bar working pressure)")
     lines.append(f"- **Internal diameter:** {results['diameter']*1000:.1f} mm")
     lines.append(f"- **Total length:** {results['total_length']:.2f} m")
     lines.append(f"- **Initial flow:** {artery.total_flow} {config.flow_unit}")
